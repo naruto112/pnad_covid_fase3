@@ -1,3 +1,2 @@
-/raw/PNAD_COVID_092020.csv
-/raw/PNAD_COVID_102020.csv
-/raw/PNAD_COVID_112020.csv
+# Ignorar tudo dentro da pasta raw
+raw/*
