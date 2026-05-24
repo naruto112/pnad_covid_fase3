@@ -8,6 +8,10 @@ e a conclusão com 5 eixos de recomendações hospitalares.
 Os dados são lidos diretamente das tabelas Parquet em `output/pnad_covid` via DuckDB
 (sem depender de Spark). Todas as agregações são ponderadas por `peso_amostral`,
 como no notebook original.
+
+A versão atual incorpora recortes regionais e séries demográficas adicionais
+absorvidas do dashboard auxiliar do parceiro (`spec_dashboard.py`), preservando
+as três perguntas-eixo do estudo principal.
 """
 
 from pathlib import Path
@@ -128,52 +132,169 @@ def filtro_mes(meses, alias: str = "") -> str:
 
 
 # =========================================================
-# CONSULTAS ANALÍTICAS (uma por análise do notebook)
+# FILTROS DEMOGRÁFICOS (sidebar — região / faixa / sexo)
+# =========================================================
+# Estado lido pelas funções analíticas. Preenchido pelo bloco de sidebar
+# antes das abas serem renderizadas.
+_FILTROS: dict = {"faixas": None, "sexos": None, "regioes": None}
+
+
+@st.cache_data(show_spinner=False)
+def opcoes_filtros():
+    """Carrega valores distintos das dimensões para popular os multiselects."""
+    regioes = q(
+        "SELECT DISTINCT regiao FROM dim_localizacao "
+        "WHERE regiao IS NOT NULL ORDER BY regiao"
+    )["regiao"].tolist()
+    faixas_disp = q(
+        "SELECT DISTINCT faixa_etaria FROM dim_perfil WHERE faixa_etaria IS NOT NULL"
+    )["faixa_etaria"].tolist()
+    # Mantém a ordem canônica
+    faixas = [f for f in ORDEM_FAIXA if f in faixas_disp]
+    sexos = q(
+        "SELECT DISTINCT sexo FROM dim_perfil WHERE sexo IS NOT NULL ORDER BY sexo"
+    )["sexo"].tolist()
+    return regioes, faixas, sexos
+
+
+OPT_REGIOES, OPT_FAIXAS, OPT_SEXOS = opcoes_filtros()
+
+
+def filtro_regiao(regioes, alias: str = "") -> str:
+    col = f"{alias}.regiao" if alias else "regiao"
+    return f"{col} IN ({', '.join(repr(r) for r in regioes)})"
+
+
+def filtro_faixa(faixas, alias: str = "") -> str:
+    col = f"{alias}.faixa_etaria" if alias else "faixa_etaria"
+    return f"{col} IN ({', '.join(repr(f) for f in faixas)})"
+
+
+def filtro_sexo(sexos, alias: str = "") -> str:
+    col = f"{alias}.sexo" if alias else "sexo"
+    return f"{col} IN ({', '.join(repr(s) for s in sexos)})"
+
+
+def _filtros_demogr(
+    alias_main: str,
+    perfil_alias: str = None,
+    loc_alias: str = None,
+    skip_faixa: bool = False,
+    skip_sexo: bool = False,
+    skip_regiao: bool = False,
+):
+    """
+    Constrói (join_sql, where_sql) com os filtros demográficos do sidebar.
+
+    - Reutiliza `perfil_alias` / `loc_alias` quando informado; senão adiciona
+      JOIN (`dp_f` / `dl_f`).
+    - `skip_*` evita aplicar o filtro do eixo do recorte do próprio gráfico
+      (ex.: gráfico por região não deve ser filtrado por região).
+    - Quando todos os valores estão selecionados, considera que o filtro está
+      inativo (devolve fragmento vazio para não pagar o custo do JOIN).
+    """
+    faixas = _FILTROS.get("faixas")
+    sexos = _FILTROS.get("sexos")
+    regioes = _FILTROS.get("regioes")
+
+    usa_faixa = (
+        (not skip_faixa)
+        and faixas is not None
+        and 0 < len(faixas) < len(OPT_FAIXAS)
+    )
+    usa_sexo = (
+        (not skip_sexo) and sexos is not None and 0 < len(sexos) < len(OPT_SEXOS)
+    )
+    usa_reg = (
+        (not skip_regiao)
+        and regioes is not None
+        and 0 < len(regioes) < len(OPT_REGIOES)
+    )
+
+    joins, wheres = [], []
+
+    if usa_faixa or usa_sexo:
+        if perfil_alias is None:
+            perfil_alias = "dp_f"
+            joins.append(
+                f"JOIN dim_perfil {perfil_alias} ON {join_cond(alias_main, perfil_alias)}"
+            )
+        if usa_faixa:
+            wheres.append(filtro_faixa(faixas, perfil_alias))
+        if usa_sexo:
+            wheres.append(filtro_sexo(sexos, perfil_alias))
+    if usa_reg:
+        if loc_alias is None:
+            loc_alias = "dl_f"
+            joins.append(
+                f"JOIN dim_localizacao {loc_alias} ON {join_cond(alias_main, loc_alias)}"
+            )
+        wheres.append(filtro_regiao(regioes, loc_alias))
+
+    join_sql = "\n".join(joins)
+    where_sql = (" AND " + " AND ".join(wheres)) if wheres else ""
+    return join_sql, where_sql
+
+
+# =========================================================
+# CONSULTAS ANALÍTICAS (uma por análise do notebook + novas)
 # =========================================================
 def prevalencia_sintomas(meses) -> pd.DataFrame:
     cols = ",\n".join(
-        f"SUM(CASE WHEN {c} = 'Sim' THEN peso_amostral ELSE 0 END) "
-        f"/ SUM(peso_amostral) * 100 AS \"{lab}\""
+        f"SUM(CASE WHEN bs.{c} = 'Sim' THEN bs.peso_amostral ELSE 0 END) "
+        f"/ SUM(bs.peso_amostral) * 100 AS \"{lab}\""
         for c, lab in SINTOMAS.items()
     )
-    df = q(f"SELECT {cols} FROM base_saude WHERE {filtro_mes(meses)}")
+    j, w = _filtros_demogr("bs")
+    df = q(
+        f"SELECT {cols} FROM base_saude bs {j} "
+        f"WHERE {filtro_mes(meses, 'bs')}{w}"
+    )
     return df.T.reset_index().set_axis(["sintoma", "pct"], axis=1).sort_values("pct")
 
 
 def evolucao_sintomas() -> pd.DataFrame:
     cols = ",\n".join(
-        f"SUM(CASE WHEN {c} = 'Sim' THEN peso_amostral ELSE 0 END) "
-        f"/ SUM(peso_amostral) * 100 AS \"{lab}\""
+        f"SUM(CASE WHEN bs.{c} = 'Sim' THEN bs.peso_amostral ELSE 0 END) "
+        f"/ SUM(bs.peso_amostral) * 100 AS \"{lab}\""
         for c, lab in SINTOMAS.items()
     )
-    df = q(f"SELECT mes_ref AS mes_ref, {cols} FROM base_saude GROUP BY mes_ref ORDER BY mes_ref")
+    j, w = _filtros_demogr("bs")
+    where_clause = f"WHERE 1=1{w}" if w else ""
+    df = q(
+        f"SELECT bs.mes_ref AS mes_ref, {cols} "
+        f"FROM base_saude bs {j} {where_clause} "
+        f"GROUP BY bs.mes_ref ORDER BY bs.mes_ref"
+    )
     longo = df.melt(id_vars="mes_ref", var_name="sintoma", value_name="pct")
     longo["mes"] = longo["mes_ref"].map(MES_LABEL)
     return longo
 
 
 def qtd_sintomas(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("bs")
     df = q(
-        f"SELECT qtd_sintomas_relatados AS qtd, SUM(peso_amostral) AS pop "
-        f"FROM base_saude WHERE {filtro_mes(meses)} "
-        f"GROUP BY qtd_sintomas_relatados ORDER BY qtd_sintomas_relatados"
+        f"SELECT bs.qtd_sintomas_relatados AS qtd, SUM(bs.peso_amostral) AS pop "
+        f"FROM base_saude bs {j} WHERE {filtro_mes(meses, 'bs')}{w} "
+        f"GROUP BY bs.qtd_sintomas_relatados ORDER BY bs.qtd_sintomas_relatados"
     )
     df["pct"] = df["pop"] / df["pop"].sum() * 100
     return df
 
 
 def testagem(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("bs")
     df = q(
         f"""
         SELECT
-            SUM(CASE WHEN fez_teste_covid = 'Sim' THEN peso_amostral ELSE 0 END)
-                / SUM(peso_amostral) * 100 AS pct_testou,
-            SUM(CASE WHEN resultado_teste_positivo = 'Positivo' THEN peso_amostral ELSE 0 END)
-                / SUM(peso_amostral) * 100 AS pct_pos_geral,
-            SUM(CASE WHEN resultado_teste_positivo = 'Positivo' THEN peso_amostral ELSE 0 END)
-                / NULLIF(SUM(CASE WHEN fez_teste_covid = 'Sim' THEN peso_amostral ELSE 0 END), 0)
+            SUM(CASE WHEN bs.fez_teste_covid = 'Sim' THEN bs.peso_amostral ELSE 0 END)
+                / SUM(bs.peso_amostral) * 100 AS pct_testou,
+            SUM(CASE WHEN bs.resultado_teste_positivo = 'Positivo' THEN bs.peso_amostral ELSE 0 END)
+                / SUM(bs.peso_amostral) * 100 AS pct_pos_geral,
+            SUM(CASE WHEN bs.resultado_teste_positivo = 'Positivo' THEN bs.peso_amostral ELSE 0 END)
+                / NULLIF(SUM(CASE WHEN bs.fez_teste_covid = 'Sim' THEN bs.peso_amostral ELSE 0 END), 0)
                 * 100 AS pct_pos_testados
-        FROM base_saude WHERE {filtro_mes(meses)}
+        FROM base_saude bs {j} WHERE {filtro_mes(meses, 'bs')}{w}
         """
     )
     return pd.DataFrame(
@@ -189,17 +310,22 @@ def testagem(meses) -> pd.DataFrame:
 
 
 def comorbidades_geral_positivos(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("bs")
+
     def linha(filtro_extra):
         cols = ",\n".join(
-            f"SUM(CASE WHEN {c} = 'Sim' THEN peso_amostral ELSE 0 END) "
-            f"/ SUM(peso_amostral) * 100 AS \"{lab}\""
+            f"SUM(CASE WHEN bs.{c} = 'Sim' THEN bs.peso_amostral ELSE 0 END) "
+            f"/ SUM(bs.peso_amostral) * 100 AS \"{lab}\""
             for c, lab in COMORBIDADES.items()
         )
-        return q(f"SELECT {cols} FROM base_saude WHERE {filtro_mes(meses)} {filtro_extra}")
+        return q(
+            f"SELECT {cols} FROM base_saude bs {j} "
+            f"WHERE {filtro_mes(meses, 'bs')}{w} {filtro_extra}"
+        )
 
     geral = linha("").T.reset_index().set_axis(["comorbidade", "pct"], axis=1)
     geral["grupo"] = "População geral"
-    pos = linha("AND resultado_teste_positivo = 'Positivo'")
+    pos = linha("AND bs.resultado_teste_positivo = 'Positivo'")
     pos = pos.T.reset_index().set_axis(["comorbidade", "pct"], axis=1)
     pos["grupo"] = "Testados positivos"
     return pd.concat([geral, pos], ignore_index=True)
@@ -211,12 +337,15 @@ def comorbidades_por_faixa(meses) -> pd.DataFrame:
         f"/ SUM(s.peso_amostral) * 100 AS \"{lab}\""
         for c, lab in COMORBIDADES.items()
     )
+    # O recorte é por faixa — não filtramos por faixa para não mascarar barras.
+    j, w = _filtros_demogr("s", perfil_alias="p", skip_faixa=True)
     df = q(
         f"""
         SELECT p.faixa_etaria, {cols}
         FROM base_saude s
         JOIN dim_perfil p ON {join_cond('s', 'p')}
-        WHERE {filtro_mes(meses, 's')}
+        {j}
+        WHERE {filtro_mes(meses, 's')}{w}
         GROUP BY p.faixa_etaria
         """
     )
@@ -225,6 +354,11 @@ def comorbidades_por_faixa(meses) -> pd.DataFrame:
 
 
 def taxa_sintoma_por(meses, coluna: str) -> pd.DataFrame:
+    skip_f = coluna == "faixa_etaria"
+    skip_s = coluna == "sexo"
+    j, w = _filtros_demogr(
+        "s", perfil_alias="p", skip_faixa=skip_f, skip_sexo=skip_s
+    )
     return q(
         f"""
         SELECT p.{coluna} AS categoria,
@@ -232,13 +366,17 @@ def taxa_sintoma_por(meses, coluna: str) -> pd.DataFrame:
                    / SUM(s.peso_amostral) * 100 AS pct
         FROM base_saude s
         JOIN dim_perfil p ON {join_cond('s', 'p')}
-        WHERE {filtro_mes(meses, 's')}
+        {j}
+        WHERE {filtro_mes(meses, 's')}{w}
         GROUP BY p.{coluna}
         """
     )
 
 
 def taxa_sintoma_faixa_sexo(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr(
+        "s", perfil_alias="p", skip_faixa=True, skip_sexo=True
+    )
     return q(
         f"""
         SELECT p.faixa_etaria, p.sexo,
@@ -246,13 +384,15 @@ def taxa_sintoma_faixa_sexo(meses) -> pd.DataFrame:
                    / SUM(s.peso_amostral) * 100 AS pct
         FROM base_saude s
         JOIN dim_perfil p ON {join_cond('s', 'p')}
-        WHERE {filtro_mes(meses, 's')}
+        {j}
+        WHERE {filtro_mes(meses, 's')}{w}
         GROUP BY p.faixa_etaria, p.sexo
         """
     )
 
 
 def isolamento_x_trabalho(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("s")
     df = q(
         f"""
         SELECT c.situacao_mercado_trabalho AS situacao,
@@ -260,9 +400,10 @@ def isolamento_x_trabalho(meses) -> pd.DataFrame:
                SUM(s.peso_amostral) AS pop
         FROM base_saude s
         JOIN base_comportamento c ON {join_cond('s', 'c')}
+        {j}
         WHERE {filtro_mes(meses, 's')}
           AND s.restricao_contato_pessoas_pandemia IN ({", ".join(repr(r) for r in ORDEM_RESTR)})
-          AND c.situacao_mercado_trabalho <> 'Nao se aplica'
+          AND c.situacao_mercado_trabalho <> 'Nao se aplica'{w}
         GROUP BY situacao, restricao
         """
     )
@@ -273,20 +414,25 @@ def isolamento_x_trabalho(meses) -> pd.DataFrame:
 
 def evolucao_comportamento() -> pd.DataFrame:
     linhas = []
+    j_s, w_s = _filtros_demogr("bs")
+    j_c, w_c = _filtros_demogr("bc")
     for m in MESES:
         rig = q(
-            f"SELECT SUM(CASE WHEN restricao_contato_pessoas_pandemia = "
-            f"'Ficou rigorosamente em casa' THEN peso_amostral ELSE 0 END) "
-            f"/ SUM(peso_amostral) * 100 AS v FROM base_saude WHERE mes_ref = '{m}'"
+            f"SELECT SUM(CASE WHEN bs.restricao_contato_pessoas_pandemia = "
+            f"'Ficou rigorosamente em casa' THEN bs.peso_amostral ELSE 0 END) "
+            f"/ SUM(bs.peso_amostral) * 100 AS v "
+            f"FROM base_saude bs {j_s} WHERE bs.mes_ref = '{m}'{w_s}"
         ).v[0]
         atend = q(
-            f"SELECT SUM(CASE WHEN buscou_atendimento_saude = 'Sim' THEN peso_amostral ELSE 0 END) "
-            f"/ SUM(peso_amostral) * 100 AS v FROM base_comportamento WHERE mes_ref = '{m}'"
+            f"SELECT SUM(CASE WHEN bc.buscou_atendimento_saude = 'Sim' "
+            f"THEN bc.peso_amostral ELSE 0 END) / SUM(bc.peso_amostral) * 100 AS v "
+            f"FROM base_comportamento bc {j_c} WHERE bc.mes_ref = '{m}'{w_c}"
         ).v[0]
         ho = q(
-            f"SELECT SUM(CASE WHEN fez_home_office = 'Sim' THEN peso_amostral ELSE 0 END) "
-            f"/ SUM(peso_amostral) * 100 AS v FROM base_comportamento "
-            f"WHERE mes_ref = '{m}' AND trabalhou_na_semana = 'Sim'"
+            f"SELECT SUM(CASE WHEN bc.fez_home_office = 'Sim' "
+            f"THEN bc.peso_amostral ELSE 0 END) / SUM(bc.peso_amostral) * 100 AS v "
+            f"FROM base_comportamento bc {j_c} "
+            f"WHERE bc.mes_ref = '{m}' AND bc.trabalhou_na_semana = 'Sim'{w_c}"
         ).v[0]
         linhas += [
             {"mes": MES_LABEL[m], "indicador": "Ficou rigorosamente em casa", "pct": rig},
@@ -297,17 +443,22 @@ def evolucao_comportamento() -> pd.DataFrame:
 
 
 def busca_atendimento(meses) -> pd.DataFrame:
+    j_bc, w_bc = _filtros_demogr("bc")
     geral = q(
-        f"SELECT SUM(CASE WHEN buscou_atendimento_saude = 'Sim' THEN peso_amostral ELSE 0 END) "
-        f"/ SUM(peso_amostral) * 100 AS v FROM base_comportamento WHERE {filtro_mes(meses)}"
+        f"SELECT SUM(CASE WHEN bc.buscou_atendimento_saude = 'Sim' "
+        f"THEN bc.peso_amostral ELSE 0 END) / SUM(bc.peso_amostral) * 100 AS v "
+        f"FROM base_comportamento bc {j_bc} "
+        f"WHERE {filtro_mes(meses, 'bc')}{w_bc}"
     ).v[0]
+    j_c, w_c = _filtros_demogr("c")
     sint = q(
         f"""
         SELECT SUM(CASE WHEN c.buscou_atendimento_saude = 'Sim' THEN c.peso_amostral ELSE 0 END)
                    / SUM(c.peso_amostral) * 100 AS v
         FROM base_comportamento c
         JOIN base_saude s ON {join_cond('c', 's')}
-        WHERE {filtro_mes(meses, 'c')} AND s.ind_teve_sintoma_gripal = 1
+        {j_c}
+        WHERE {filtro_mes(meses, 'c')} AND s.ind_teve_sintoma_gripal = 1{w_c}
         """
     ).v[0]
     return pd.DataFrame(
@@ -321,27 +472,33 @@ def locais_atendimento(meses) -> pd.DataFrame:
         f"/ SUM(s.peso_amostral) * 100 AS \"{lab}\""
         for c, lab in LOCAIS_ATENDIMENTO.items()
     )
+    j, w = _filtros_demogr("s")
     df = q(
         f"""
         SELECT {cols}
         FROM base_saude s
         JOIN base_comportamento c ON {join_cond('s', 'c')}
-        WHERE {filtro_mes(meses, 's')} AND c.buscou_atendimento_saude = 'Sim'
+        {j}
+        WHERE {filtro_mes(meses, 's')} AND c.buscou_atendimento_saude = 'Sim'{w}
         """
     )
     return df.T.reset_index().set_axis(["local", "pct"], axis=1).sort_values("pct")
 
 
 def situacao_mercado(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("bc")
     return q(
-        f"SELECT situacao_mercado_trabalho AS situacao, SUM(peso_amostral) AS pop "
-        f"FROM base_comportamento "
-        f"WHERE {filtro_mes(meses)} AND situacao_mercado_trabalho <> 'Nao se aplica' "
+        f"SELECT bc.situacao_mercado_trabalho AS situacao, SUM(bc.peso_amostral) AS pop "
+        f"FROM base_comportamento bc {j} "
+        f"WHERE {filtro_mes(meses, 'bc')} "
+        f"AND bc.situacao_mercado_trabalho <> 'Nao se aplica'{w} "
         f"GROUP BY situacao ORDER BY pop DESC"
     )
 
 
 def home_office_regiao(meses) -> pd.DataFrame:
+    # Recorte por região — não aplica filtro de região.
+    j, w = _filtros_demogr("c", loc_alias="l", skip_regiao=True)
     return q(
         f"""
         SELECT l.regiao,
@@ -349,17 +506,20 @@ def home_office_regiao(meses) -> pd.DataFrame:
                    / SUM(c.peso_amostral) * 100 AS pct
         FROM base_comportamento c
         JOIN dim_localizacao l ON {join_cond('c', 'l')}
-        WHERE {filtro_mes(meses, 'c')} AND c.trabalhou_na_semana = 'Sim'
+        {j}
+        WHERE {filtro_mes(meses, 'c')} AND c.trabalhou_na_semana = 'Sim'{w}
         GROUP BY l.regiao ORDER BY pct
         """
     )
 
 
 def motivos_afastamento(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("bc")
     df = q(
-        f"SELECT motivo_afastamento AS motivo, SUM(peso_amostral) AS pop "
-        f"FROM base_comportamento "
-        f"WHERE {filtro_mes(meses)} AND estava_afastado_com_vinculo = 'Sim' "
+        f"SELECT bc.motivo_afastamento AS motivo, SUM(bc.peso_amostral) AS pop "
+        f"FROM base_comportamento bc {j} "
+        f"WHERE {filtro_mes(meses, 'bc')} "
+        f"AND bc.estava_afastado_com_vinculo = 'Sim'{w} "
         f"GROUP BY motivo ORDER BY pop DESC LIMIT 6"
     )
     df["pct"] = df["pop"] / df["pop"].sum() * 100
@@ -368,34 +528,44 @@ def motivos_afastamento(meses) -> pd.DataFrame:
 
 def cobertura_beneficios(meses) -> pd.DataFrame:
     cols = ",\n".join(
-        f"SUM(CASE WHEN {c} = 'Sim' THEN peso_amostral ELSE 0 END) "
-        f"/ SUM(peso_amostral) * 100 AS \"{lab}\""
+        f"SUM(CASE WHEN be.{c} = 'Sim' THEN be.peso_amostral ELSE 0 END) "
+        f"/ SUM(be.peso_amostral) * 100 AS \"{lab}\""
         for c, lab in BENEFICIOS.items()
     )
-    df = q(f"SELECT {cols} FROM base_economico WHERE {filtro_mes(meses)}")
+    j, w = _filtros_demogr("be")
+    df = q(
+        f"SELECT {cols} FROM base_economico be {j} "
+        f"WHERE {filtro_mes(meses, 'be')}{w}"
+    )
     return df.T.reset_index().set_axis(["beneficio", "pct"], axis=1).sort_values("pct")
 
 
 def evolucao_auxilio() -> pd.DataFrame:
+    j, w = _filtros_demogr("be")
+    where_clause = f"WHERE 1=1{w}" if w else ""
     return q(
-        """
-        SELECT mes_ref AS mes_ref,
-               SUM(CASE WHEN recebeu_auxilio_emergencial = 'Sim' THEN peso_amostral ELSE 0 END)
-                   / SUM(peso_amostral) * 100 AS pct_ae,
-               SUM(CASE WHEN recebeu_bolsa_familia = 'Sim' THEN peso_amostral ELSE 0 END)
-                   / SUM(peso_amostral) * 100 AS pct_bf,
-               SUM(CASE WHEN recebeu_auxilio_emergencial = 'Sim'
-                         AND valor_auxilio_emergencial IS NOT NULL
-                        THEN valor_auxilio_emergencial * peso_amostral ELSE 0 END)
-               / NULLIF(SUM(CASE WHEN recebeu_auxilio_emergencial = 'Sim'
-                                  AND valor_auxilio_emergencial IS NOT NULL
-                                 THEN peso_amostral ELSE 0 END), 0) AS valor_medio
-        FROM base_economico GROUP BY mes_ref ORDER BY mes_ref
+        f"""
+        SELECT be.mes_ref AS mes_ref,
+               SUM(CASE WHEN be.recebeu_auxilio_emergencial = 'Sim' THEN be.peso_amostral ELSE 0 END)
+                   / SUM(be.peso_amostral) * 100 AS pct_ae,
+               SUM(CASE WHEN be.recebeu_bolsa_familia = 'Sim' THEN be.peso_amostral ELSE 0 END)
+                   / SUM(be.peso_amostral) * 100 AS pct_bf,
+               SUM(CASE WHEN be.recebeu_auxilio_emergencial = 'Sim'
+                         AND be.valor_auxilio_emergencial IS NOT NULL
+                        THEN be.valor_auxilio_emergencial * be.peso_amostral ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN be.recebeu_auxilio_emergencial = 'Sim'
+                                  AND be.valor_auxilio_emergencial IS NOT NULL
+                                 THEN be.peso_amostral ELSE 0 END), 0) AS valor_medio
+        FROM base_economico be {j}
+        {where_clause}
+        GROUP BY be.mes_ref ORDER BY be.mes_ref
         """
     )
 
 
 def auxilio_por_regiao(meses):
+    # Recorte por região — não aplica filtro de região.
+    j, w = _filtros_demogr("e", loc_alias="l", skip_regiao=True)
     df = q(
         f"""
         SELECT l.regiao,
@@ -403,46 +573,52 @@ def auxilio_por_regiao(meses):
                    / SUM(e.peso_amostral) AS valor_medio
         FROM base_economico e
         JOIN dim_localizacao l ON {join_cond('e', 'l')}
+        {j}
         WHERE {filtro_mes(meses, 'e')}
           AND e.recebeu_auxilio_emergencial = 'Sim'
-          AND e.valor_auxilio_emergencial IS NOT NULL
+          AND e.valor_auxilio_emergencial IS NOT NULL{w}
         GROUP BY l.regiao ORDER BY valor_medio
         """
     )
+    j2, w2 = _filtros_demogr("be", skip_regiao=True)
     geral = q(
         f"""
-        SELECT SUM(valor_auxilio_emergencial * peso_amostral) / SUM(peso_amostral) AS v
-        FROM base_economico
-        WHERE {filtro_mes(meses)}
-          AND recebeu_auxilio_emergencial = 'Sim'
-          AND valor_auxilio_emergencial IS NOT NULL
+        SELECT SUM(be.valor_auxilio_emergencial * be.peso_amostral)
+               / SUM(be.peso_amostral) AS v
+        FROM base_economico be {j2}
+        WHERE {filtro_mes(meses, 'be')}
+          AND be.recebeu_auxilio_emergencial = 'Sim'
+          AND be.valor_auxilio_emergencial IS NOT NULL{w2}
         """
     ).v[0]
     return df, geral
 
 
 def overlap_beneficios(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("be")
     return q(
         f"""
         SELECT
             CASE
-                WHEN recebeu_auxilio_emergencial = 'Sim' AND recebeu_bolsa_familia = 'Sim'
+                WHEN be.recebeu_auxilio_emergencial = 'Sim' AND be.recebeu_bolsa_familia = 'Sim'
                     THEN 'Auxílio Emergencial + Bolsa Família'
-                WHEN recebeu_auxilio_emergencial = 'Sim' THEN 'Só Auxílio Emergencial'
-                WHEN recebeu_bolsa_familia = 'Sim' THEN 'Só Bolsa Família'
+                WHEN be.recebeu_auxilio_emergencial = 'Sim' THEN 'Só Auxílio Emergencial'
+                WHEN be.recebeu_bolsa_familia = 'Sim' THEN 'Só Bolsa Família'
                 ELSE 'Nenhum dos dois'
             END AS grupo,
-            SUM(peso_amostral) AS pop
-        FROM base_economico WHERE {filtro_mes(meses)}
+            SUM(be.peso_amostral) AS pop
+        FROM base_economico be {j} WHERE {filtro_mes(meses, 'be')}{w}
         GROUP BY grupo
         """
     )
 
 
 def supressao_renda(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("be")
     df = q(
-        f"SELECT ind_tem_renda_efetiva AS ind, SUM(peso_amostral) AS pop "
-        f"FROM base_economico WHERE {filtro_mes(meses)} GROUP BY ind"
+        f"SELECT be.ind_tem_renda_efetiva AS ind, SUM(be.peso_amostral) AS pop "
+        f"FROM base_economico be {j} "
+        f"WHERE {filtro_mes(meses, 'be')}{w} GROUP BY ind"
     )
     df["situacao"] = df["ind"].map({1: "Com renda efetiva", 0: "Sem renda efetiva"})
     df["pct"] = df["pop"] / df["pop"].sum() * 100
@@ -450,10 +626,12 @@ def supressao_renda(meses) -> pd.DataFrame:
 
 
 def distribuicao_renda(meses) -> pd.DataFrame:
+    j, w = _filtros_demogr("be")
     return q(
-        f"SELECT renda_efetiva_trabalho_principal AS renda, peso_amostral AS peso "
-        f"FROM base_economico "
-        f"WHERE {filtro_mes(meses)} AND renda_efetiva_trabalho_principal > 0"
+        f"SELECT be.renda_efetiva_trabalho_principal AS renda, be.peso_amostral AS peso "
+        f"FROM base_economico be {j} "
+        f"WHERE {filtro_mes(meses, 'be')} "
+        f"AND be.renda_efetiva_trabalho_principal > 0{w}"
     )
 
 
@@ -463,8 +641,225 @@ def mediana_pond(valores: pd.Series, pesos: pd.Series) -> float:
     return float(d.loc[d["p"].cumsum() >= corte, "v"].iloc[0])
 
 
+# ---------------------------------------------------------
+# NOVAS ANÁLISES — refinamentos absorvidos do spec_dashboard
+# ---------------------------------------------------------
+def sintomas_por_regiao(meses) -> pd.DataFrame:
+    """% da população com síndrome gripal por região × mês."""
+    j, w = _filtros_demogr("bs", loc_alias="l", skip_regiao=True)
+    df = q(
+        f"""
+        SELECT l.regiao AS regiao, bs.mes_ref AS mes_ref,
+               SUM(bs.ind_teve_sintoma_gripal * bs.peso_amostral)
+                   / SUM(bs.peso_amostral) * 100 AS pct
+        FROM base_saude bs
+        JOIN dim_localizacao l ON {join_cond('bs', 'l')}
+        {j}
+        WHERE {filtro_mes(meses, 'bs')}{w}
+        GROUP BY l.regiao, bs.mes_ref
+        ORDER BY l.regiao, bs.mes_ref
+        """
+    )
+    df["mes"] = df["mes_ref"].map(MES_LABEL)
+    return df
+
+
+def evolucao_sintoma_por_faixa() -> pd.DataFrame:
+    """% de síndrome gripal por faixa etária × mês (set→nov)."""
+    # Recorte por faixa — não aplica filtro de faixa.
+    j, w = _filtros_demogr("s", perfil_alias="p", skip_faixa=True)
+    df = q(
+        f"""
+        SELECT p.faixa_etaria AS faixa_etaria, s.mes_ref AS mes_ref,
+               SUM(s.ind_teve_sintoma_gripal * s.peso_amostral)
+                   / SUM(s.peso_amostral) * 100 AS pct
+        FROM base_saude s
+        JOIN dim_perfil p ON {join_cond('s', 'p')}
+        {j}
+        {f"WHERE 1=1{w}" if w else ""}
+        GROUP BY p.faixa_etaria, s.mes_ref
+        ORDER BY p.faixa_etaria, s.mes_ref
+        """
+    )
+    df["mes"] = df["mes_ref"].map(MES_LABEL)
+    return df
+
+
+def sintomaticos_com_comorbidade(meses):
+    """
+    Indicador-chave para triagem: dentre os sintomáticos (síndrome gripal),
+    qual % tinha pelo menos uma das comorbidades monitoradas.
+
+    Retorna (pct_entre_sintomaticos, pct_da_populacao).
+    """
+    cond_com = " OR ".join(f"bs.{c} = 'Sim'" for c in COMORBIDADES.keys())
+    j, w = _filtros_demogr("bs")
+    df = q(
+        f"""
+        SELECT
+            SUM(CASE WHEN bs.ind_teve_sintoma_gripal = 1 AND ({cond_com})
+                     THEN bs.peso_amostral ELSE 0 END)
+                / NULLIF(SUM(CASE WHEN bs.ind_teve_sintoma_gripal = 1
+                                  THEN bs.peso_amostral ELSE 0 END), 0)
+                * 100 AS pct_entre_sint,
+            SUM(CASE WHEN bs.ind_teve_sintoma_gripal = 1 AND ({cond_com})
+                     THEN bs.peso_amostral ELSE 0 END)
+                / SUM(bs.peso_amostral) * 100 AS pct_populacao
+        FROM base_saude bs {j} WHERE {filtro_mes(meses, 'bs')}{w}
+        """
+    )
+    entre = float(df.pct_entre_sint[0] or 0)
+    pop = float(df.pct_populacao[0] or 0)
+    return entre, pop
+
+
+def evolucao_home_office_regiao() -> pd.DataFrame:
+    """% de ocupados em home office por região × mês."""
+    j, w = _filtros_demogr("c", loc_alias="l", skip_regiao=True)
+    df = q(
+        f"""
+        SELECT l.regiao AS regiao, c.mes_ref AS mes_ref,
+               SUM(CASE WHEN c.fez_home_office = 'Sim' THEN c.peso_amostral ELSE 0 END)
+                   / SUM(c.peso_amostral) * 100 AS pct
+        FROM base_comportamento c
+        JOIN dim_localizacao l ON {join_cond('c', 'l')}
+        {j}
+        WHERE c.trabalhou_na_semana = 'Sim'{w}
+        GROUP BY l.regiao, c.mes_ref
+        ORDER BY l.regiao, c.mes_ref
+        """
+    )
+    df["mes"] = df["mes_ref"].map(MES_LABEL)
+    return df
+
+
+def evolucao_situacao_mercado() -> pd.DataFrame:
+    """Distribuição da população por situação no mercado de trabalho ao longo dos meses."""
+    j, w = _filtros_demogr("bc")
+    df = q(
+        f"""
+        SELECT bc.mes_ref AS mes_ref,
+               bc.situacao_mercado_trabalho AS situacao,
+               SUM(bc.peso_amostral) AS pop
+        FROM base_comportamento bc {j}
+        WHERE bc.situacao_mercado_trabalho <> 'Nao se aplica'{w}
+        GROUP BY bc.mes_ref, bc.situacao_mercado_trabalho
+        ORDER BY bc.mes_ref
+        """
+    )
+    df["mes"] = df["mes_ref"].map(MES_LABEL)
+    total_mes = df.groupby("mes_ref")["pop"].transform("sum")
+    df["pct"] = df["pop"] / total_mes * 100
+    return df
+
+
+def renda_por_regiao(meses):
+    """Renda efetiva média do trabalho principal por região + média geral."""
+    j, w = _filtros_demogr("be", loc_alias="l", skip_regiao=True)
+    df = q(
+        f"""
+        SELECT l.regiao,
+               SUM(be.renda_efetiva_trabalho_principal * be.peso_amostral)
+               / NULLIF(SUM(CASE WHEN be.renda_efetiva_trabalho_principal IS NOT NULL
+                                 THEN be.peso_amostral ELSE 0 END), 0) AS renda_media
+        FROM base_economico be
+        JOIN dim_localizacao l ON {join_cond('be', 'l')}
+        {j}
+        WHERE {filtro_mes(meses, 'be')}
+          AND be.renda_efetiva_trabalho_principal IS NOT NULL{w}
+        GROUP BY l.regiao
+        ORDER BY renda_media
+        """
+    )
+    j2, w2 = _filtros_demogr("be", skip_regiao=True)
+    geral = q(
+        f"""
+        SELECT SUM(be.renda_efetiva_trabalho_principal * be.peso_amostral)
+               / NULLIF(SUM(CASE WHEN be.renda_efetiva_trabalho_principal IS NOT NULL
+                                 THEN be.peso_amostral ELSE 0 END), 0) AS v
+        FROM base_economico be {j2}
+        WHERE {filtro_mes(meses, 'be')}
+          AND be.renda_efetiva_trabalho_principal IS NOT NULL{w2}
+        """
+    ).v[0]
+    return df, float(geral or 0)
+
+
+def mapa_risco_regional() -> pd.DataFrame:
+    """
+    Painel multi-eixo por região × mês — útil para identificar regiões em
+    situação crítica para preparação de um próximo surto.
+    Métricas: % síndrome gripal, % dificuldade respirar (gravidade),
+    % home office (proxy de exposição), % auxílio emergencial (vulnerabilidade).
+    """
+    j_s, w_s = _filtros_demogr("s", loc_alias="l_s", skip_regiao=True)
+    j_c, w_c = _filtros_demogr("c", loc_alias="l_c", skip_regiao=True)
+    j_e, w_e = _filtros_demogr("e", loc_alias="l_e", skip_regiao=True)
+
+    where_s = f"WHERE 1=1{w_s}" if w_s else ""
+    where_c = f"WHERE 1=1{w_c}" if w_c else ""
+    where_e = f"WHERE 1=1{w_e}" if w_e else ""
+
+    sql = f"""
+        WITH saude AS (
+            SELECT l_s.regiao AS regiao, s.mes_ref AS mes_ref,
+                   SUM(s.ind_teve_sintoma_gripal * s.peso_amostral)
+                       / SUM(s.peso_amostral) * 100 AS pct_sintomas,
+                   SUM(CASE WHEN s.sintoma_dificuldade_respirar = 'Sim'
+                            THEN s.peso_amostral ELSE 0 END)
+                       / SUM(s.peso_amostral) * 100 AS pct_dif_respirar
+            FROM base_saude s
+            JOIN dim_localizacao l_s ON {join_cond('s', 'l_s')}
+            {j_s}
+            {where_s}
+            GROUP BY l_s.regiao, s.mes_ref
+        ),
+        comportamento AS (
+            SELECT l_c.regiao AS regiao, c.mes_ref AS mes_ref,
+                   SUM(CASE WHEN c.fez_home_office = 'Sim'
+                            THEN c.peso_amostral ELSE 0 END)
+                       / NULLIF(SUM(CASE WHEN c.trabalhou_na_semana = 'Sim'
+                                         THEN c.peso_amostral ELSE 0 END), 0)
+                       * 100 AS pct_home_office
+            FROM base_comportamento c
+            JOIN dim_localizacao l_c ON {join_cond('c', 'l_c')}
+            {j_c}
+            {where_c}
+            GROUP BY l_c.regiao, c.mes_ref
+        ),
+        economico AS (
+            SELECT l_e.regiao AS regiao, e.mes_ref AS mes_ref,
+                   SUM(CASE WHEN e.recebeu_auxilio_emergencial = 'Sim'
+                            THEN e.peso_amostral ELSE 0 END)
+                       / SUM(e.peso_amostral) * 100 AS pct_auxilio
+            FROM base_economico e
+            JOIN dim_localizacao l_e ON {join_cond('e', 'l_e')}
+            {j_e}
+            {where_e}
+            GROUP BY l_e.regiao, e.mes_ref
+        )
+        SELECT saude.regiao AS regiao,
+               saude.mes_ref AS mes_ref,
+               saude.pct_sintomas,
+               saude.pct_dif_respirar,
+               comportamento.pct_home_office,
+               economico.pct_auxilio
+        FROM saude
+        LEFT JOIN comportamento
+               ON saude.regiao = comportamento.regiao
+              AND saude.mes_ref = comportamento.mes_ref
+        LEFT JOIN economico
+               ON saude.regiao = economico.regiao
+              AND saude.mes_ref = economico.mes_ref
+        ORDER BY saude.regiao, saude.mes_ref
+    """
+    df = q(sql)
+    df["mes"] = df["mes_ref"].map(MES_LABEL)
+    return df
+
+
 # =========================================================
-# SIDEBAR — filtro de meses
+# SIDEBAR — filtros
 # =========================================================
 st.sidebar.header("Filtros")
 meses_sel = st.sidebar.multiselect(
@@ -476,9 +871,44 @@ meses_sel = st.sidebar.multiselect(
 if not meses_sel:
     meses_sel = MESES
     st.sidebar.warning("Nenhum mês selecionado — exibindo os três meses.")
+
+regioes_sel = st.sidebar.multiselect(
+    "Regiões",
+    options=OPT_REGIOES,
+    default=OPT_REGIOES,
+)
+if not regioes_sel:
+    regioes_sel = OPT_REGIOES
+    st.sidebar.warning("Nenhuma região selecionada — exibindo todas.")
+
+faixas_sel = st.sidebar.multiselect(
+    "Faixa etária",
+    options=OPT_FAIXAS,
+    default=OPT_FAIXAS,
+)
+if not faixas_sel:
+    faixas_sel = OPT_FAIXAS
+    st.sidebar.warning("Nenhuma faixa selecionada — exibindo todas.")
+
+sexos_sel = st.sidebar.multiselect(
+    "Sexo",
+    options=OPT_SEXOS,
+    default=OPT_SEXOS,
+)
+if not sexos_sel:
+    sexos_sel = OPT_SEXOS
+    st.sidebar.warning("Nenhum sexo selecionado — exibindo todos.")
+
+# Propaga seleção para o estado lido pelas funções analíticas.
+_FILTROS["faixas"] = faixas_sel
+_FILTROS["sexos"] = sexos_sel
+_FILTROS["regioes"] = regioes_sel
+
 st.sidebar.caption(
-    "O filtro afeta os gráficos consolidados. As séries de **evolução mensal** "
-    "sempre mostram set/out/nov 2020."
+    "Os filtros de **mês, região, faixa e sexo** afetam todos os gráficos consolidados. "
+    "Gráficos cujo eixo principal **já é** o recorte (ex.: sintomas por região, "
+    "taxa por faixa) ignoram o filtro do eixo correspondente para não mascarar o "
+    "recorte. Séries de evolução mensal sempre mostram set/out/nov 2020."
 )
 
 # =========================================================
@@ -604,6 +1034,19 @@ with abas[1]:
     st.caption("A prevalência dos sintomas cai ao longo dos três meses — coerente com a "
                "desaceleração da primeira onda.")
 
+    st.subheader("🌎 Síndrome gripal por região")
+    df = sintomas_por_regiao(meses_sel)
+    fig = px.bar(
+        df, x="pct", y="regiao", color="mes", barmode="group", orientation="h",
+        text="pct",
+        title="Percentual da população com síndrome gripal por região e mês",
+    )
+    fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
+    fig.update_layout(xaxis_title="% da população", yaxis_title="", legend_title="Mês")
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Recorte regional do indicador mais transversal — identifica regiões com "
+               "maior carga sintomática para priorização territorial.")
+
     st.subheader("🔢 Quantidade de sintomas por pessoa")
     df = qtd_sintomas(meses_sel)
     fig = px.bar(
@@ -629,6 +1072,18 @@ with abas[1]:
                "testados é várias vezes maior que na população geral.")
 
     st.subheader("🩺 Comorbidades: população geral vs. testados positivos")
+    pct_com_entre_sint, pct_com_populacao = sintomaticos_com_comorbidade(meses_sel)
+    cA, cB = st.columns(2)
+    cA.metric(
+        "Sintomáticos com pelo menos uma comorbidade",
+        f"{pct_com_entre_sint:.1f}%",
+        help="Entre quem teve síndrome gripal — variável-chave para protocolo de triagem.",
+    )
+    cB.metric(
+        "Mesma combinação na população total",
+        f"{pct_com_populacao:.2f}%",
+        help="Pessoas sintomáticas E com comorbidade, dividido pela população total.",
+    )
     df = comorbidades_geral_positivos(meses_sel)
     fig = px.bar(
         df, x="comorbidade", y="pct", color="grupo", barmode="group", text="pct",
@@ -684,6 +1139,18 @@ with abas[1]:
     )
     fig.update_layout(xaxis_title="Faixa etária", yaxis_title="Sexo")
     st.plotly_chart(fig, width="stretch")
+
+    st.subheader("📈 Evolução mensal da síndrome gripal por faixa etária")
+    df = evolucao_sintoma_por_faixa()
+    fig = px.line(
+        df, x="mes", y="pct", color="faixa_etaria", markers=True,
+        category_orders={"faixa_etaria": ORDEM_FAIXA},
+        title="Taxa de síndrome gripal por faixa etária (set → nov 2020)",
+    )
+    fig.update_layout(xaxis_title="Mês", yaxis_title="%", legend_title="Faixa etária")
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Tendência mês a mês por faixa — verifica se a desaceleração da onda foi "
+               "homogênea entre os grupos etários.")
 
 # =========================================================
 # ABA 2 — COMPORTAMENTO
@@ -749,6 +1216,17 @@ with abas[2]:
     fig.update_traces(textinfo="label+percent")
     st.plotly_chart(fig, width="stretch")
 
+    st.subheader("📈 Evolução mensal da situação no mercado de trabalho")
+    df = evolucao_situacao_mercado()
+    fig = px.area(
+        df, x="mes", y="pct", color="situacao",
+        title="Composição mensal por situação no mercado de trabalho (set → nov 2020)",
+    )
+    fig.update_layout(xaxis_title="Mês", yaxis_title="% da população",
+                      legend_title="Situação")
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Mostra a dinâmica de ocupados/desocupados/inativos no trimestre.")
+
     st.subheader("🌎 Home office por região")
     df = home_office_regiao(meses_sel)
     fig = px.bar(
@@ -761,6 +1239,17 @@ with abas[2]:
     st.plotly_chart(fig, width="stretch")
     st.caption("Norte e Nordeste registram as menores taxas de home office — maior exposição "
                "presencial.")
+
+    st.subheader("📈 Evolução do home office por região")
+    df = evolucao_home_office_regiao()
+    fig = px.line(
+        df, x="mes", y="pct", color="regiao", markers=True,
+        title="Home office (entre ocupados) por região (set → nov 2020)",
+    )
+    fig.update_layout(xaxis_title="Mês", yaxis_title="% dos ocupados", legend_title="Região")
+    st.plotly_chart(fig, width="stretch")
+    st.caption("A tendência mensal por região permite detectar movimentos diferenciais de "
+               "retorno ao trabalho presencial.")
 
     st.subheader("📋 Motivos de afastamento do trabalho")
     df = motivos_afastamento(meses_sel)
@@ -839,6 +1328,23 @@ with abas[3]:
     fig.update_layout(xaxis_title="R$", yaxis_title="", coloraxis_showscale=False)
     st.plotly_chart(fig, width="stretch")
 
+    st.subheader("🗺️ Renda efetiva média por região")
+    df_r, renda_geral = renda_por_regiao(meses_sel)
+    fig = px.bar(
+        df_r, x="renda_media", y="regiao", orientation="h", text="renda_media",
+        title="Renda efetiva média do trabalho principal por região",
+        color="renda_media", color_continuous_scale="Mint",
+    )
+    fig.update_traces(texttemplate="R$ %{text:.0f}", textposition="outside")
+    fig.add_vline(
+        x=renda_geral, line_dash="dash", line_color="red",
+        annotation_text=f"Média geral: R$ {renda_geral:.0f}",
+    )
+    fig.update_layout(xaxis_title="R$", yaxis_title="", coloraxis_showscale=False)
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Disparidade regional da renda do trabalho — Norte/Nordeste tendem a ficar "
+               "abaixo da média nacional.")
+
     st.subheader("🔗 Sobreposição: Auxílio Emergencial + Bolsa Família")
     df = overlap_beneficios(meses_sel)
     fig = px.pie(
@@ -892,21 +1398,71 @@ with abas[4]:
         "As recomendações de prevenção refletem esse fato."
     )
 
-    # --- números calculados ao vivo, para o texto bater com os gráficos ---
+    # --- bloco "Mapa de Risco Regional" (multi-eixo: saúde + comportamento + economia) ---
+    st.subheader("🗺️ Mapa de Risco Regional")
+    st.markdown(
+        "Painel que cruza os três eixos do estudo por **região × mês**. "
+        "Regiões com alta carga sintomática + dificuldade respiratória elevada + baixo "
+        "home office + alta dependência do auxílio são as **prioritárias** para a "
+        "preparação hospitalar de um próximo surto."
+    )
+    df_risco = mapa_risco_regional()
+    mes_ref_risco = st.selectbox(
+        "Mês de referência do mapa de risco",
+        options=MESES,
+        index=len(MESES) - 1,
+        format_func=lambda m: MES_LABEL[m],
+        key="mes_risco",
+    )
+    df_mes = df_risco[df_risco["mes_ref"] == mes_ref_risco].copy()
+    indicadores = {
+        "pct_sintomas": "Síndrome gripal (%)",
+        "pct_dif_respirar": "Dificuldade respirar (%)",
+        "pct_home_office": "Home office (% ocupados)",
+        "pct_auxilio": "Auxílio Emergencial (%)",
+    }
+    matriz = df_mes.set_index("regiao")[list(indicadores.keys())]
+    matriz.columns = list(indicadores.values())
+    fig = px.imshow(
+        matriz, text_auto=".1f", aspect="auto", color_continuous_scale="RdYlGn_r",
+        title=f"Indicadores-chave por região — {MES_LABEL[mes_ref_risco]}",
+    )
+    fig.update_layout(xaxis_title="", yaxis_title="Região")
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Cores mais quentes (vermelho) indicam **maior risco/dependência**. "
+        "Para `Home office`, valores baixos são mais críticos (maior exposição presencial) — "
+        "a escala é invertida intencionalmente: leia células avermelhadas como "
+        "**ponto de atenção**, independentemente do indicador."
+    )
+
+    st.markdown("---")
+
+    # --- KPIs (vivem do filtro demográfico ativo) ---
     prev = prevalencia_sintomas(MESES).set_index("sintoma")["pct"]
     tst = testagem(MESES).set_index("indicador")["pct"]
     ba = busca_atendimento(MESES).set_index("grupo")["pct"]
+    pct_com_entre_sint, _ = sintomaticos_com_comorbidade(MESES)
+    j_kpi, w_kpi = _filtros_demogr("bs")
     rig_geral = q(
-        "SELECT SUM(CASE WHEN restricao_contato_pessoas_pandemia = 'Ficou rigorosamente em casa' "
-        "THEN peso_amostral ELSE 0 END) / SUM(peso_amostral) * 100 AS v FROM base_saude"
+        f"SELECT SUM(CASE WHEN bs.restricao_contato_pessoas_pandemia = "
+        f"'Ficou rigorosamente em casa' THEN bs.peso_amostral ELSE 0 END) "
+        f"/ SUM(bs.peso_amostral) * 100 AS v "
+        f"FROM base_saude bs {j_kpi} "
+        + (f"WHERE 1=1{w_kpi}" if w_kpi else "")
     ).v[0]
     sint_geral = q(
-        "SELECT SUM(ind_teve_sintoma_gripal * peso_amostral) / SUM(peso_amostral) * 100 AS v "
-        "FROM base_saude"
+        f"SELECT SUM(bs.ind_teve_sintoma_gripal * bs.peso_amostral) "
+        f"/ SUM(bs.peso_amostral) * 100 AS v "
+        f"FROM base_saude bs {j_kpi} "
+        + (f"WHERE 1=1{w_kpi}" if w_kpi else "")
     ).v[0]
+    j_ae, w_ae = _filtros_demogr("be")
     ae_geral = q(
-        "SELECT SUM(CASE WHEN recebeu_auxilio_emergencial = 'Sim' THEN peso_amostral ELSE 0 END) "
-        "/ SUM(peso_amostral) * 100 AS v FROM base_economico"
+        f"SELECT SUM(CASE WHEN be.recebeu_auxilio_emergencial = 'Sim' "
+        f"THEN be.peso_amostral ELSE 0 END) / SUM(be.peso_amostral) * 100 AS v "
+        f"FROM base_economico be {j_ae} "
+        + (f"WHERE 1=1{w_ae}" if w_ae else "")
     ).v[0]
     sup = supressao_renda(MESES).set_index("situacao")["pct"]
     sem_renda = float(sup.get("Sem renda efetiva", 0))
@@ -927,6 +1483,7 @@ with abas[4]:
 | Sinalizar **alto risco** em pacientes com dificuldade respiratória | Indicador de severidade clínica imediata |
 | Criar protocolo acelerado para **idosos com hipertensão ou diabetes** | Comorbidades crescem rapidamente após os 45 anos |
 | Usar **perda de olfato/paladar** como critério de isolamento imediato | Sintoma altamente específico da COVID-19 |
+| Marcar como **alta prioridade** todo sintomático com comorbidade | {pct_com_entre_sint:.1f}% dos sintomáticos têm pelo menos uma comorbidade monitorada |
 """
     )
 
@@ -971,7 +1528,7 @@ with abas[4]:
         """
 | Ação | Fundamentação nos dados |
 |---|---|
-| Monitorar **Norte e Nordeste**: menor renda, menor home office, maior informalidade | Confluência de fatores de risco |
+| Monitorar **Norte e Nordeste**: menor renda, menor home office, maior informalidade | Confluência de fatores de risco evidenciada no mapa de risco regional |
 | Expandir **testagem móvel** em áreas rurais | Menor acesso a estabelecimentos de saúde |
 | Integrar dados de localização para identificar **clusters de alta positividade** | A chave uf + id_domicilio permite análise geoespacial |
 """
