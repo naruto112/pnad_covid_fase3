@@ -1,5 +1,5 @@
 # Ignorar tudo dentro da pasta raw
-# raw/*
+raw/*
 .DS_Store
 
 # Pastas ignoradas
