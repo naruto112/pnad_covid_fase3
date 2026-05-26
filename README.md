@@ -433,10 +433,49 @@ dc[dc['nome_semantico'] == 'motivo_afastamento'][['valor','descricao_valor']].to
 
 ---
 
+## Como executar o dashboard Streamlit
+
+O dashboard interativo fica no arquivo `code/dashboard_analise_refinada.py` e lê as tabelas Parquet geradas em `output/pnad_covid`.
+
+1. Abra um terminal na raiz do projeto (`Tech Challenge`).
+
+2. Opcionalmente, crie e ative um ambiente virtual:
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+3. Instale as dependências necessárias para o dashboard:
+
+```bash
+pip install streamlit duckdb pandas plotly pyarrow
+```
+
+4. Verifique se as bases Parquet já existem em `output/pnad_covid/`. O dashboard espera encontrar, pelo menos, as pastas `base_saude`, `base_comportamento`, `base_economico`, `dim_perfil` e `dim_localizacao`.
+
+5. Execute o Streamlit apontando para o arquivo do dashboard:
+
+```bash
+streamlit run code/dashboard_analise_refinada.py
+```
+
+6. Abra no navegador a URL exibida no terminal, normalmente:
+
+```text
+http://localhost:8501
+```
+
+7. Para encerrar o dashboard, volte ao terminal e pressione `Ctrl+C`.
+
+> Se o comando `streamlit` não for reconhecido, execute com o módulo do Python: `python -m streamlit run code/dashboard_analise_refinada.py`.
+
+---
+
 ## Dependências
 
 ```bash
-pip install pyspark pandas pyarrow openpyxl xlrd setuptools
+pip install pyspark pandas pyarrow openpyxl xlrd setuptools streamlit duckdb plotly
 ```
 
 > Python 3.12 removeu `distutils` da stdlib. O `setuptools` fornece a shim necessária para o PySpark 3.5.x.
