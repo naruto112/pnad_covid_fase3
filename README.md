@@ -437,7 +437,7 @@ dc[dc['nome_semantico'] == 'motivo_afastamento'][['valor','descricao_valor']].to
 
 O dashboard interativo fica no arquivo `code/dashboard_analise_refinada.py` e lê as tabelas Parquet geradas em `output/pnad_covid`.
 
-1. Abra um terminal na raiz do projeto (`Tech Challenge`).
+1. Abra um terminal na raiz do projeto (`{SEU_PROJETO}`).
 
 2. Opcionalmente, crie e ative um ambiente virtual:
 
