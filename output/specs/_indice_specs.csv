@@ -1,0 +1,22 @@
+﻿slug;titulo;arquivo_csv;linhas;colunas;status;erro
+01_evolucao_geral_sintomas_gripais;Evolução geral de sintomas gripais por mês;../output/specs/01_evolucao_geral_sintomas_gripais.csv;3;2;OK;
+02_sintomas_gripais_por_regiao;Sintomas gripais por região;../output/specs/02_sintomas_gripais_por_regiao.csv;15;3;OK;
+03_sintomas_por_faixa_etaria;Sintomas por faixa etária;../output/specs/03_sintomas_por_faixa_etaria.csv;18;3;OK;
+04_gravidade_dificuldade_respirar;Gravidade clínica: dificuldade para respirar;../output/specs/04_gravidade_dificuldade_respirar.csv;3;2;OK;
+05_sintomas_com_comorbidades;População com sintomas e comorbidades;../output/specs/05_sintomas_com_comorbidades.csv;3;2;OK;
+06_busca_atendimento_saude;Busca por atendimento de saúde;../output/specs/06_busca_atendimento_saude.csv;3;2;OK;
+07_local_atendimento;Onde a população buscou atendimento;;0;0;ERRO;"Binder Error: Referenced column ""atendimento_posto_ubs"" not found in FROM clause!
+Candidate bindings: ""tem_plano_saude_bloco_b"", ""buscou_atendimento_saude"", ""motivo_afastamento"", ""foi_sedado_entubado_internacao"", ""id_morador""
+
+LINE 3:     ROUND(SUM(CASE WHEN atendimento_posto_ubs = 'Sim' THEN peso_amostral ELSE 0...
+                                ^"
+08_uso_mascara_por_mes;Uso de máscara por mês;;0;0;ERRO;"Binder Error: Referenced column ""usa_mascara"" not found in FROM clause!
+Candidate bindings: ""situacao_mercado_trabalho"", ""trabalhou_na_semana"", ""peso_amostral"", ""upa"", ""semana_mes""
+
+LINE 4:         SUM(CASE WHEN usa_mascara = 'Sim' THEN peso_amostral ELSE 0 END)
+                              ^"
+09_home_office_por_regiao;Home office por região;../output/specs/09_home_office_por_regiao.csv;15;3;OK;
+10_situacao_mercado_trabalho;Situação do mercado de trabalho;../output/specs/10_situacao_mercado_trabalho.csv;15;3;OK;
+11_dependencia_auxilio_emergencial;Dependência de auxílio emergencial;../output/specs/11_dependencia_auxilio_emergencial.csv;3;3;OK;
+12_renda_efetiva_media_por_regiao;Renda efetiva média por região;../output/specs/12_renda_efetiva_media_por_regiao.csv;15;3;OK;
+13_insights_prevencao_proximo_surto;Insights para prevenção de próximo surto de COVID;../output/specs/13_insights_prevencao_proximo_surto.csv;15;6;OK;

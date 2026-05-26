@@ -2,7 +2,7 @@
 
 ## Visão geral
 
-Este pipeline transforma os microdados brutos da **PNAD COVID-19 (IBGE)** em bases analíticas limpas, com variáveis renomeadas semanticamente e categorias traduzidas de código numérico para texto legível (ex.: `1 → "Homem"`, `2 → "Mulher"`).
+E ste pipeline transforma os microdados brutos da **PNAD COVID-19 (IBGE)** em bases analíticas limpas, com variáveis renomeadas semanticamente e categorias traduzidas de código numérico para texto legível (ex.: `1 → "Homem"`, `2 → "Mulher"`).
 
 **Período coberto:** maio a novembro de 2020  
 **Amostra:** ~193 mil domicílios por mês, painel fixo (as mesmas famílias são entrevistadas todos os meses, permitindo análise longitudinal)  
