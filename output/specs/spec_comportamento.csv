@@ -1,0 +1,21 @@
+mes_ref,variavel,descricao,pct_ponderado,grupo
+2020-09,restricao_contato_pessoas_pandemia,Ficou rigorosamente em casa,16.32084966598694,protecao
+2020-09,buscou_atendimento_saude_geral,Buscou atendimento (geral),1.0716081684537586,atendimento
+2020-09,buscou_atendimento_saude_sintomaticos,Buscou atendimento (sintomáticos),1.3521491333195514,atendimento
+2020-09,fez_home_office,Home office (entre ocupados),10.163035653881968,trabalho
+2020-10,restricao_contato_pessoas_pandemia,Ficou rigorosamente em casa,12.423407414088821,protecao
+2020-10,buscou_atendimento_saude_geral,Buscou atendimento (geral),1.0023163053451687,atendimento
+2020-10,buscou_atendimento_saude_sintomaticos,Buscou atendimento (sintomáticos),1.195607120640384,atendimento
+2020-10,fez_home_office,Home office (entre ocupados),9.334352606326629,trabalho
+2020-11,restricao_contato_pessoas_pandemia,Ficou rigorosamente em casa,11.10349603331512,protecao
+2020-11,buscou_atendimento_saude_geral,Buscou atendimento (geral),1.1017590869907607,atendimento
+2020-11,buscou_atendimento_saude_sintomaticos,Buscou atendimento (sintomáticos),1.357377639088067,atendimento
+2020-11,fez_home_office,Home office (entre ocupados),8.923090538976272,trabalho
+TOTAL,restricao_contato_pessoas_pandemia,Ficou rigorosamente em casa,13.281515672171881,protecao
+TOTAL,buscou_atendimento_saude_geral,Buscou atendimento (geral),1.0585673494988763,atendimento
+TOTAL,buscou_atendimento_saude_sintomaticos,Buscou atendimento (sintomáticos),1.3071121560525274,atendimento
+TOTAL,fez_home_office,Home office (entre ocupados),9.466247825936168,trabalho
+TOTAL,situacao_mercado_trabalho,Ocupado - trabalhou,47.46545340997233,mercado_trabalho
+TOTAL,situacao_mercado_trabalho,Fora da forca de trabalho,40.523932127152996,mercado_trabalho
+TOTAL,situacao_mercado_trabalho,Desocupado,7.5846594674171115,mercado_trabalho
+TOTAL,situacao_mercado_trabalho,Ocupado - afastado,4.425954995457559,mercado_trabalho

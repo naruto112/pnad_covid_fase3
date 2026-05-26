@@ -1,0 +1,41 @@
+mes_ref,variavel,descricao,categoria,pop_ponderada,pct_ponderado,grupo
+2020-09,sintoma_febre,Febre,Sim,1583337,0.7490033721408311,sintoma
+2020-09,sintoma_tosse,Tosse,Sim,3026779,1.4318290432774186,sintoma
+2020-09,sintoma_dificuldade_respirar,Dific. Respirar,Sim,998492,0.4723403450748321,sintoma
+2020-09,sintoma_perda_olfato_paladar,Perda Olfato/Paladar,Sim,861771,0.4076639882086035,sintoma
+2020-09,sintoma_fadiga,Fadiga,Sim,1500221,0.709685413724735,sintoma
+2020-09,medico_deu_diagnostico_diabetes,Diabetes,Sim,10920425,5.165948656375776,comorbidade
+2020-09,medico_deu_diagnostico_hipertensao,Hipertensão,Sim,27708214,13.107475837867891,comorbidade
+2020-09,medico_deu_diagnostico_doencas_coracao_infarto_angina,Doenças Cardíacas,Sim,5299187,2.506800381525408,comorbidade
+2020-09,fez_teste_covid,Realizou teste,Sim,21947409,10.382305006926888,testagem
+2020-09,resultado_teste_positivo,Resultado Positivo,Positivo,1619444,0.7660840658743512,testagem
+2020-10,sintoma_febre,Febre,Sim,1504519,0.7112808857264619,sintoma
+2020-10,sintoma_tosse,Tosse,Sim,2617999,1.2376927725603768,sintoma
+2020-10,sintoma_dificuldade_respirar,Dific. Respirar,Sim,868985,0.4108239793654179,sintoma
+2020-10,sintoma_perda_olfato_paladar,Perda Olfato/Paladar,Sim,702358,0.33204894231497534,sintoma
+2020-10,sintoma_fadiga,Fadiga,Sim,1405524,0.6644793776056428,sintoma
+2020-10,medico_deu_diagnostico_diabetes,Diabetes,Sim,11116340,5.255392354635773,comorbidade
+2020-10,medico_deu_diagnostico_hipertensao,Hipertensão,Sim,28038350,13.255489631712994,comorbidade
+2020-10,medico_deu_diagnostico_doencas_coracao_infarto_angina,Doenças Cardíacas,Sim,5445512,2.574435799914469,comorbidade
+2020-10,fez_teste_covid,Realizou teste,Sim,25658906,12.13057714356467,testagem
+2020-10,resultado_teste_positivo,Resultado Positivo,Positivo,1863659,0.8810687863402316,testagem
+2020-11,sintoma_febre,Febre,Sim,1768385,0.8355137480686791,sintoma
+2020-11,sintoma_tosse,Tosse,Sim,3025912,1.4296615100088719,sintoma
+2020-11,sintoma_dificuldade_respirar,Dific. Respirar,Sim,911997,0.4308938880594961,sintoma
+2020-11,sintoma_perda_olfato_paladar,Perda Olfato/Paladar,Sim,795837,0.37601159440886334,sintoma
+2020-11,sintoma_fadiga,Fadiga,Sim,1515096,0.7158415310393271,sintoma
+2020-11,medico_deu_diagnostico_diabetes,Diabetes,Sim,11126398,5.256921068907245,comorbidade
+2020-11,medico_deu_diagnostico_hipertensao,Hipertensão,Sim,28182265,13.315355274823801,comorbidade
+2020-11,medico_deu_diagnostico_doencas_coracao_infarto_angina,Doenças Cardíacas,Sim,5473614,2.5861340360368503,comorbidade
+2020-11,fez_teste_covid,Realizou teste,Sim,28592470,13.509166185595673,testagem
+2020-11,resultado_teste_positivo,Resultado Positivo,Positivo,2045131,0.966269091306891,testagem
+TOTAL,sintoma_febre,Febre,Sim,4856241,0.7652837074242302,sintoma
+TOTAL,sintoma_tosse,Tosse,Sim,8670690,1.3663939698477368,sintoma
+TOTAL,sintoma_dificuldade_respirar,Dific. Respirar,Sim,2779474,0.4380109100010546,sintoma
+TOTAL,sintoma_perda_olfato_paladar,Perda Olfato/Paladar,Sim,2359967,0.37190168385600253,sintoma
+TOTAL,sintoma_fadiga,Fadiga,Sim,4420841,0.696670027841222,sintoma
+TOTAL,medico_deu_diagnostico_diabetes,Diabetes,Sim,33163163,5.226105997485245,comorbidade
+TOTAL,medico_deu_diagnostico_hipertensao,Hipertensão,Sim,83928829,13.22614949481633,comorbidade
+TOTAL,medico_deu_diagnostico_doencas_coracao_infarto_angina,Doenças Cardíacas,Sim,16218313,2.555806324059319,comorbidade
+TOTAL,fez_teste_covid,Realizou teste,Sim,76198785,12.007989851567324,testagem
+TOTAL,resultado_teste_positivo,Resultado Positivo,Positivo,5528234,0.8711816477831305,testagem

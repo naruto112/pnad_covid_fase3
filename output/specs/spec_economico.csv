@@ -1,0 +1,32 @@
+mes_ref,variavel,descricao,pct_ponderado,valor_medio_ponderado,grupo
+2020-09,recebeu_auxilio_emergencial,Recebeu Auxílio Emergencial,50.267182311288636,,beneficio
+2020-09,recebeu_bolsa_familia,Recebeu Bolsa Família,4.734762646246244,,beneficio
+2020-09,recebeu_seguro_desemprego,Recebeu Seguro Desemprego,3.133237670089878,,beneficio
+2020-09,valor_auxilio_emergencial,Valor médio Auxílio Emergencial,,935.9816993368117,renda
+2020-09,ind_tem_renda_efetiva,Sem renda efetiva no mês,62.64569267283135,,renda
+2020-10,recebeu_auxilio_emergencial,Recebeu Auxílio Emergencial,48.651005542784155,,beneficio
+2020-10,recebeu_bolsa_familia,Recebeu Bolsa Família,7.980705358688716,,beneficio
+2020-10,recebeu_seguro_desemprego,Recebeu Seguro Desemprego,3.185744028340813,,beneficio
+2020-10,valor_auxilio_emergencial,Valor médio Auxílio Emergencial,,708.3763316523294,renda
+2020-10,ind_tem_renda_efetiva,Sem renda efetiva no mês,61.910262182646136,,renda
+2020-11,recebeu_auxilio_emergencial,Recebeu Auxílio Emergencial,47.233554222246404,,beneficio
+2020-11,recebeu_bolsa_familia,Recebeu Bolsa Família,8.968423572430604,,beneficio
+2020-11,recebeu_seguro_desemprego,Recebeu Seguro Desemprego,3.169647465415073,,beneficio
+2020-11,valor_auxilio_emergencial,Valor médio Auxílio Emergencial,,574.9818689095192,renda
+2020-11,ind_tem_renda_efetiva,Sem renda efetiva no mês,61.5545262659231,,renda
+TOTAL,recebeu_auxilio_emergencial,Recebeu Auxílio Emergencial,48.716626059129126,,beneficio
+TOTAL,recebeu_bolsa_familia,Recebeu Bolsa Família,7.228831075115323,,beneficio
+TOTAL,recebeu_seguro_desemprego,Recebeu Seguro Desemprego,3.1628838496609664,,beneficio
+TOTAL,valor_auxilio_emergencial,Valor médio Auxílio Emergencial,,743.4737559416221,renda
+TOTAL,ind_tem_renda_efetiva,Sem renda efetiva no mês,62.03660354254607,,renda
+TOTAL,renda_efetiva_trabalho_principal,Mediana renda efetiva,,1400.0,renda
+TOTAL,renda_efetiva_trabalho_principal,Média renda efetiva,,2224.0550862925174,renda
+TOTAL,sobreposicao_bf_ae,Nenhum,50.016642067282525,,sobreposicao
+TOTAL,sobreposicao_bf_ae,Só AE,42.7545268576025,,sobreposicao
+TOTAL,sobreposicao_bf_ae,AE + BF,5.962099201524335,,sobreposicao
+TOTAL,sobreposicao_bf_ae,Só BF,1.2667318735906274,,sobreposicao
+TOTAL,valor_auxilio_regiao,Auxílio médio - Centro-Oeste,,692.9563025785178,renda_regiao
+TOTAL,valor_auxilio_regiao,Auxílio médio - Nordeste,,712.8289525232661,renda_regiao
+TOTAL,valor_auxilio_regiao,Auxílio médio - Sul,,732.9061167410531,renda_regiao
+TOTAL,valor_auxilio_regiao,Auxílio médio - Sudeste,,733.1147530185345,renda_regiao
+TOTAL,valor_auxilio_regiao,Auxílio médio - Norte,,763.5026314282038,renda_regiao
